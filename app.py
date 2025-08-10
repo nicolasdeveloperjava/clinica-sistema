@@ -5,7 +5,7 @@ from werkzeug.utils import secure_filename
 import os
 
 app = Flask(__name__)
-CORS(app)  # libera CORS para todas origens, para produção você pode limitar
+CORS(app)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///clinica.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -13,8 +13,6 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 db = SQLAlchemy(app)
-
-# Modelos
 
 class Paciente(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -34,16 +32,39 @@ class Terapia(db.Model):
 class Sessao(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     data = db.Column(db.String(10), nullable=False)
-    documento = db.Column(db.String(200))  # nome do arquivo salvo
+    documento = db.Column(db.String(200))
     terapia_id = db.Column(db.Integer, db.ForeignKey('terapia.id'), nullable=False)
-
-# Rotas
 
 @app.route('/')
 def index():
     return 'Backend da Clínica funcionando!'
 
-# Terapias - listar
+# Rota para cadastrar paciente
+@app.route('/pacientes', methods=['POST'])
+def criar_paciente():
+    data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': 'Dados JSON obrigatórios'}), 400
+
+    prontuario = data.get('prontuario')
+    nome = data.get('nome')
+    data_inicio = data.get('data_inicio', '')
+    data_anamnese = data.get('data_anamnese', '')
+
+    if not prontuario or not nome:
+        return jsonify({'success': False, 'error': 'Prontuário e nome são obrigatórios'}), 400
+
+    if Paciente.query.filter_by(prontuario=prontuario).first():
+        return jsonify({'success': False, 'error': 'Prontuário já existe'}), 400
+
+    paciente = Paciente(prontuario=prontuario, nome=nome,
+                        data_inicio=data_inicio, data_anamnese=data_anamnese)
+    db.session.add(paciente)
+    db.session.commit()
+
+    return jsonify({'success': True})
+
+# Listar terapias
 @app.route('/terapias')
 def listar_terapias():
     prontuario = request.args.get('prontuario')
@@ -52,13 +73,10 @@ def listar_terapias():
     paciente = Paciente.query.filter_by(prontuario=prontuario).first()
     if not paciente:
         return jsonify([])
-    terapias = [
-        {'id': t.id, 'tipo_terapia': t.tipo_terapia, 'frequencia': t.frequencia}
-        for t in paciente.terapias
-    ]
+    terapias = [{'id': t.id, 'tipo_terapia': t.tipo_terapia, 'frequencia': t.frequencia} for t in paciente.terapias]
     return jsonify(terapias)
 
-# Terapias - criar
+# Criar terapia
 @app.route('/terapias', methods=['POST'])
 def criar_terapia():
     prontuario = request.form.get('prontuario')
@@ -78,7 +96,7 @@ def criar_terapia():
     db.session.commit()
     return jsonify({'success': True})
 
-# Terapias - apagar
+# Apagar terapia
 @app.route('/terapias/<int:id>', methods=['DELETE'])
 def apagar_terapia(id):
     terapia = Terapia.query.get(id)
@@ -94,7 +112,7 @@ def apagar_terapia(id):
     db.session.commit()
     return jsonify({'success': True})
 
-# Sessões - listar
+# Listar sessões
 @app.route('/sessoes')
 def listar_sessoes():
     terapia_id = request.args.get('terapia_id')
@@ -103,14 +121,10 @@ def listar_sessoes():
     sessoes = Sessao.query.filter_by(terapia_id=terapia_id).order_by(Sessao.data).all()
     resultado = []
     for s in sessoes:
-        resultado.append({
-            'id': s.id,
-            'data': s.data,
-            'documento': s.documento
-        })
+        resultado.append({'id': s.id, 'data': s.data, 'documento': s.documento})
     return jsonify(resultado)
 
-# Sessões - criar
+# Criar sessão
 @app.route('/sessoes', methods=['POST'])
 def criar_sessao():
     terapia_id = request.form.get('terapia_id')
@@ -120,7 +134,6 @@ def criar_sessao():
     terapia = Terapia.query.get(terapia_id)
     if not terapia:
         return jsonify({'success': False, 'error': 'Terapia não encontrada'}), 404
-
     arquivo = request.files.get('file')
     nome_arquivo_salvo = None
     if arquivo:
@@ -128,13 +141,12 @@ def criar_sessao():
         nome_arquivo_salvo = f"{terapia_id}_{data}_{nome_arquivo}"
         caminho = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo_salvo)
         arquivo.save(caminho)
-
     sessao = Sessao(data=data, documento=nome_arquivo_salvo, terapia=terapia)
     db.session.add(sessao)
     db.session.commit()
     return jsonify({'success': True})
 
-# Sessões - apagar
+# Apagar sessão
 @app.route('/sessoes/<int:id>', methods=['DELETE'])
 def apagar_sessao(id):
     sessao = Sessao.query.get(id)
@@ -159,6 +171,6 @@ def download_arquivo(filename):
 
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()  # cria tabelas no banco se ainda não existirem
+        db.create_all()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
