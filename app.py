@@ -158,8 +158,7 @@ def download_arquivo(filename):
     return abort(404)
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
     with app.app_context():
-        db.create_all()  # cria tabelas se não existirem
+        db.create_all()  # cria tabelas no banco se ainda não existirem
+    port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
