@@ -3,6 +3,12 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
+from app import db, app
+
+with app.app_context():
+    db.create_all()
+    print("Banco de dados e tabelas criados com sucesso!")
+
 
 app = Flask(__name__)
 CORS(app)
@@ -16,11 +22,11 @@ db = SQLAlchemy(app)
 
 class Paciente(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    prontuario = db.Column(db.String(20), unique=True, nullable=False)
-    nome = db.Column(db.String(100), nullable=False)
-    data_inicio = db.Column(db.String(10))
-    data_anamnese = db.Column(db.String(10))
-    terapias = db.relationship('Terapia', backref='paciente', cascade="all, delete-orphan")
+    prontuario = db.Column(db.String, unique=True)
+    nome = db.Column(db.String)
+    data_inicio = db.Column(db.Date)
+    data_anamnese = db.Column(db.Date)
+
 
 class Terapia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -174,3 +180,4 @@ if __name__ == '__main__':
         db.create_all()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
