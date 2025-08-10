@@ -1,135 +1,128 @@
-import os
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
+from flask import Flask, request, jsonify, send_from_directory, abort
+from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
-import sqlite3
-from datetime import datetime
-
-# Configurações
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'jpg', 'png'}
+import os
 
 app = Flask(__name__)
-CORS(app)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///clinica.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['UPLOAD_FOLDER'] = 'uploads'
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Usuário e senha únicos
-USERNAME = "admin"
-PASSWORD = "clinica123"
+db = SQLAlchemy(app)
 
-# Criar pasta de uploads
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# Modelos
 
-# Função para conectar no banco
-def get_db_connection():
-    conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+class Paciente(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    prontuario = db.Column(db.String(20), unique=True, nullable=False)
+    nome = db.Column(db.String(100), nullable=False)
+    data_inicio = db.Column(db.String(10))
+    data_anamnese = db.Column(db.String(10))
+    terapias = db.relationship('Terapia', backref='paciente', cascade="all, delete-orphan")
 
-# Criar tabelas se não existirem
-def init_db():
-    conn = get_db_connection()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS pacientes (
-            prontuario TEXT PRIMARY KEY,
-            nome TEXT,
-            data_inicio TEXT,
-            data_anamnese TEXT
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS terapias (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            prontuario TEXT,
-            tipo_terapia TEXT,
-            frequencia INTEGER
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS sessoes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            terapia_id INTEGER,
-            data TEXT,
-            documento TEXT
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS documentos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            prontuario TEXT,
-            tipo TEXT,
-            data TEXT,
-            arquivo TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+class Terapia(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    tipo_terapia = db.Column(db.String(50), nullable=False)
+    frequencia = db.Column(db.Integer, nullable=False)
+    paciente_id = db.Column(db.Integer, db.ForeignKey('paciente.id'), nullable=False)
+    sessoes = db.relationship('Sessao', backref='terapia', cascade="all, delete-orphan")
 
-init_db()
+class Sessao(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    data = db.Column(db.String(10), nullable=False)
+    documento = db.Column(db.String(200))  # nome do arquivo salvo
+    terapia_id = db.Column(db.Integer, db.ForeignKey('terapia.id'), nullable=False)
 
-# Autenticação simples
-@app.route("/login", methods=["POST"])
-def login():
-    data = request.json
-    if data["username"] == USERNAME and data["password"] == PASSWORD:
-        return jsonify({"success": True})
-    return jsonify({"success": False}), 401
+# Rotas
 
-# Listar pacientes
-@app.route("/pacientes", methods=["GET"])
-def listar_pacientes():
-    conn = get_db_connection()
-    pacientes = conn.execute("SELECT * FROM pacientes").fetchall()
-    conn.close()
-    return jsonify([dict(p) for p in pacientes])
+# Terapias - listar
+@app.route('/terapias')
+def listar_terapias():
+    prontuario = request.args.get('prontuario')
+    if not prontuario:
+        return jsonify({'error':'prontuario é obrigatório'}), 400
+    paciente = Paciente.query.filter_by(prontuario=prontuario).first()
+    if not paciente:
+        return jsonify([])  # vazio
+    terapias = [
+        {'id': t.id, 'tipo_terapia': t.tipo_terapia, 'frequencia': t.frequencia}
+        for t in paciente.terapias
+    ]
+    return jsonify(terapias)
 
-# Adicionar paciente
-@app.route("/pacientes", methods=["POST"])
-def adicionar_paciente():
-    data = request.form
-    prontuario = data["prontuario"]
-    nome = data["nome"]
-    data_inicio = data.get("data_inicio", "")
-    data_anamnese = data.get("data_anamnese", "")
+# Terapias - criar
+@app.route('/terapias', methods=['POST'])
+def criar_terapia():
+    prontuario = request.form.get('prontuario')
+    tipo_terapia = request.form.get('tipo_terapia')
+    frequencia = request.form.get('frequencia')
+    if not (prontuario and tipo_terapia and frequencia):
+        return jsonify({'success': False, 'error': 'Campos obrigatórios faltando'}), 400
+    paciente = Paciente.query.filter_by(prontuario=prontuario).first()
+    if not paciente:
+        return jsonify({'success': False, 'error': 'Paciente não encontrado'}), 404
+    try:
+        frequencia = int(frequencia)
+    except:
+        return jsonify({'success': False, 'error': 'Frequência inválida'}), 400
+    terapia = Terapia(tipo_terapia=tipo_terapia, frequencia=frequencia, paciente=paciente)
+    db.session.add(terapia)
+    db.session.commit()
+    return jsonify({'success': True})
 
-    conn = get_db_connection()
-    conn.execute("INSERT INTO pacientes (prontuario, nome, data_inicio, data_anamnese) VALUES (?, ?, ?, ?)",
-                 (prontuario, nome, data_inicio, data_anamnese))
-    conn.commit()
-    conn.close()
-    return jsonify({"success": True})
+# Terapias - apagar
+@app.route('/terapias/<int:id>', methods=['DELETE'])
+def apagar_terapia(id):
+    terapia = Terapia.query.get(id)
+    if not terapia:
+        return jsonify({'success': False, 'error': 'Terapia não encontrada'}), 404
+    # Apaga os arquivos das sessões antes
+    for sessao in terapia.sessoes:
+        if sessao.documento:
+            try:
+                os.remove(os.path.join(app.config['UPLOAD_FOLDER'], sessao.documento))
+            except Exception:
+                pass
+    db.session.delete(terapia)
+    db.session.commit()
+    return jsonify({'success': True})
 
-# Upload de documento
-@app.route("/upload", methods=["POST"])
-def upload_file():
-    prontuario = request.form["prontuario"]
-    tipo = request.form["tipo"]  # evolução, pei, pti, anamnese
-    file = request.files["file"]
+# Sessões - listar
+@app.route('/sessoes')
+def listar_sessoes():
+    terapia_id = request.args.get('terapia_id')
+    if not terapia_id:
+        return jsonify({'error': 'terapia_id obrigatório'}), 400
+    sessoes = Sessao.query.filter_by(terapia_id=terapia_id).order_by(Sessao.data).all()
+    resultado = []
+    for s in sessoes:
+        resultado.append({
+            'id': s.id,
+            'data': s.data,
+            'documento': s.documento
+        })
+    return jsonify(resultado)
 
-    if file and file.filename.split('.')[-1].lower() in ALLOWED_EXTENSIONS:
-        filename = secure_filename(file.filename)
-        pasta_paciente = os.path.join(app.config['UPLOAD_FOLDER'], prontuario)
-        os.makedirs(pasta_paciente, exist_ok=True)
-        caminho = os.path.join(pasta_paciente, filename)
-        file.save(caminho)
+# Sessões - criar
+@app.route('/sessoes', methods=['POST'])
+def criar_sessao():
+    terapia_id = request.form.get('terapia_id')
+    data = request.form.get('data')
+    if not (terapia_id and data):
+        return jsonify({'success': False, 'error': 'Campos obrigatórios faltando'}), 400
+    terapia = Terapia.query.get(terapia_id)
+    if not terapia:
+        return jsonify({'success': False, 'error': 'Terapia não encontrada'}), 404
 
-        conn = get_db_connection()
-        conn.execute("INSERT INTO documentos (prontuario, tipo, data, arquivo) VALUES (?, ?, ?, ?)",
-                     (prontuario, tipo, datetime.today().strftime("%Y-%m-%d"), filename))
-        conn.commit()
-        conn.close()
+    arquivo = request.files.get('file')
+    nome_arquivo_salvo = None
+    if arquivo:
+        nome_arquivo = secure_filename(arquivo.filename)
+        # Para evitar nomes repetidos, adiciona id ou timestamp (simplifico aqui)
+        nome_arquivo_salvo = f"{terapia_id}_{data}_{nome_arquivo}"
+        caminho = o
 
-        return jsonify({"success": True})
-    return jsonify({"success": False, "error": "Formato inválido"}), 400
 
-# Baixar documento
-@app.route("/download/<prontuario>/<filename>", methods=["GET"])
-def download_file(prontuario, filename):
-    pasta_paciente = os.path.join(app.config['UPLOAD_FOLDER'], prontuario)
-    return send_from_directory(pasta_paciente, filename)
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
 
 
