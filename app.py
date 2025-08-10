@@ -70,6 +70,11 @@ def criar_terapia():
     db.session.add(terapia)
     db.session.commit()
     return jsonify({'success': True})
+    
+@app.route('/')
+def index():
+    return 'Backend da Clínica funcionando!'
+
 
 # Terapias - apagar
 @app.route('/terapias/<int:id>', methods=['DELETE'])
@@ -129,6 +134,7 @@ import os
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
 
 
 
