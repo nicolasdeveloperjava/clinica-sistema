@@ -3,6 +3,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
+from datetime import datetime
+
 
 app = Flask(__name__)
 CORS(app)
@@ -59,8 +61,27 @@ def criar_paciente():
     if Paciente.query.filter_by(prontuario=prontuario).first():
         return jsonify({'success': False, 'error': 'Prontuário já existe'}), 400
 
-    paciente = Paciente(prontuario=prontuario, nome=nome,
-                        data_inicio=data_inicio, data_anamnese=data_anamnese)
+    data_inicio_obj = None
+    data_anamnese_obj = None
+
+    if data_inicio:
+        try:
+            data_inicio_obj = datetime.strptime(data_inicio, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Formato inválido para data_inicio'}), 400
+
+    if data_anamnese:
+        try:
+            data_anamnese_obj = datetime.strptime(data_anamnese, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Formato inválido para data_anamnese'}), 400
+
+    paciente = Paciente(
+        prontuario=prontuario,
+        nome=nome,
+        data_inicio=data_inicio_obj,
+        data_anamnese=data_anamnese_obj
+    )
     db.session.add(paciente)
     db.session.commit()
 
@@ -165,4 +186,5 @@ def download_arquivo(filename):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
 
