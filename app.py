@@ -3,12 +3,6 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
-from app import db, app
-
-with app.app_context():
-    db.create_all()
-    print("Banco de dados e tabelas criados com sucesso!")
-
 
 app = Flask(__name__)
 CORS(app)
@@ -27,7 +21,6 @@ class Paciente(db.Model):
     data_inicio = db.Column(db.Date)
     data_anamnese = db.Column(db.Date)
 
-
 class Terapia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     tipo_terapia = db.Column(db.String(50), nullable=False)
@@ -41,11 +34,14 @@ class Sessao(db.Model):
     documento = db.Column(db.String(200))
     terapia_id = db.Column(db.Integer, db.ForeignKey('terapia.id'), nullable=False)
 
+with app.app_context():
+    db.create_all()
+    print("Banco de dados e tabelas criados com sucesso!")
+
 @app.route('/')
 def index():
     return 'Backend da Clínica funcionando!'
 
-# Rota para cadastrar paciente
 @app.route('/pacientes', methods=['POST'])
 def criar_paciente():
     data = request.json
@@ -54,8 +50,8 @@ def criar_paciente():
 
     prontuario = data.get('prontuario')
     nome = data.get('nome')
-    data_inicio = data.get('data_inicio', '')
-    data_anamnese = data.get('data_anamnese', '')
+    data_inicio = data.get('data_inicio', None)
+    data_anamnese = data.get('data_anamnese', None)
 
     if not prontuario or not nome:
         return jsonify({'success': False, 'error': 'Prontuário e nome são obrigatórios'}), 400
@@ -70,19 +66,17 @@ def criar_paciente():
 
     return jsonify({'success': True})
 
-# Listar terapias
 @app.route('/terapias')
 def listar_terapias():
     prontuario = request.args.get('prontuario')
     if not prontuario:
-        return jsonify({'error':'prontuario é obrigatório'}), 400
+        return jsonify({'error': 'prontuario é obrigatório'}), 400
     paciente = Paciente.query.filter_by(prontuario=prontuario).first()
     if not paciente:
         return jsonify([])
     terapias = [{'id': t.id, 'tipo_terapia': t.tipo_terapia, 'frequencia': t.frequencia} for t in paciente.terapias]
     return jsonify(terapias)
 
-# Criar terapia
 @app.route('/terapias', methods=['POST'])
 def criar_terapia():
     prontuario = request.form.get('prontuario')
@@ -97,12 +91,11 @@ def criar_terapia():
         frequencia = int(frequencia)
     except:
         return jsonify({'success': False, 'error': 'Frequência inválida'}), 400
-    terapia = Terapia(tipo_terapia=tipo_terapia, frequencia=frequencia, paciente=paciente)
+    terapia = Terapia(tipo_terapia=tipo_terapia, frequencia=frequencia, paciente_id=paciente.id)
     db.session.add(terapia)
     db.session.commit()
     return jsonify({'success': True})
 
-# Apagar terapia
 @app.route('/terapias/<int:id>', methods=['DELETE'])
 def apagar_terapia(id):
     terapia = Terapia.query.get(id)
@@ -118,19 +111,15 @@ def apagar_terapia(id):
     db.session.commit()
     return jsonify({'success': True})
 
-# Listar sessões
 @app.route('/sessoes')
 def listar_sessoes():
     terapia_id = request.args.get('terapia_id')
     if not terapia_id:
         return jsonify({'error': 'terapia_id obrigatório'}), 400
     sessoes = Sessao.query.filter_by(terapia_id=terapia_id).order_by(Sessao.data).all()
-    resultado = []
-    for s in sessoes:
-        resultado.append({'id': s.id, 'data': s.data, 'documento': s.documento})
+    resultado = [{'id': s.id, 'data': s.data, 'documento': s.documento} for s in sessoes]
     return jsonify(resultado)
 
-# Criar sessão
 @app.route('/sessoes', methods=['POST'])
 def criar_sessao():
     terapia_id = request.form.get('terapia_id')
@@ -147,12 +136,11 @@ def criar_sessao():
         nome_arquivo_salvo = f"{terapia_id}_{data}_{nome_arquivo}"
         caminho = os.path.join(app.config['UPLOAD_FOLDER'], nome_arquivo_salvo)
         arquivo.save(caminho)
-    sessao = Sessao(data=data, documento=nome_arquivo_salvo, terapia=terapia)
+    sessao = Sessao(data=data, documento=nome_arquivo_salvo, terapia_id=terapia.id)
     db.session.add(sessao)
     db.session.commit()
     return jsonify({'success': True})
 
-# Apagar sessão
 @app.route('/sessoes/<int:id>', methods=['DELETE'])
 def apagar_sessao(id):
     sessao = Sessao.query.get(id)
@@ -167,7 +155,6 @@ def apagar_sessao(id):
     db.session.commit()
     return jsonify({'success': True})
 
-# Download arquivo da sessão
 @app.route('/download/<filename>')
 def download_arquivo(filename):
     caminho = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -176,8 +163,6 @@ def download_arquivo(filename):
     return abort(404)
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
 
